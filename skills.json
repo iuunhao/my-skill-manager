@@ -1,0 +1,97 @@
+{
+  "#": "Agent Skills Config - Portable across machines",
+  "# Usage": "sk import skills.json",
+  "skills": [
+    {
+      "source": "vercel-labs/skills",
+      "skill": "find-skills",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git",
+      "desc": "发现和安装新技能，搜索技能市场",
+      "type": "dev"
+    },
+    {
+      "source": "anthropics/skills",
+      "skill": "docx",
+      "sourceUrl": "https://github.com/anthropics/skills.git",
+      "desc": "创建、读取、编辑 Word 文档",
+      "type": "content"
+    },
+    {
+      "source": "anthropics/skills",
+      "skill": "skill-creator",
+      "sourceUrl": "https://github.com/anthropics/skills.git",
+      "desc": "创建、修改和测评 Agent 技能",
+      "type": "dev"
+    },
+    {
+      "source": "vercel-labs/agent-skills",
+      "skill": "react-best-practices",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "desc": "React 和 Next.js 性能优化最佳实践",
+      "type": "dev"
+    },
+    {
+      "source": "kepano/obsidian-skills",
+      "skill": "obsidian-bases",
+      "sourceUrl": "https://github.com/kepano/obsidian-skills.git",
+      "desc": "创建和编辑 Obsidian Bases 数据库视图",
+      "type": "content"
+    },
+    {
+      "source": "vercel-labs/agent-browser",
+      "skill": "agent-browser",
+      "sourceUrl": "https://github.com/vercel-labs/agent-browser.git",
+      "desc": "浏览器自动化，网页交互和截图",
+      "type": "integration"
+    },
+    {
+      "source": "vercel-labs/agent-skills",
+      "skill": "web-design-guidelines",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "desc": "Web 界面规范审查，无障碍和 UX 检查",
+      "type": "dev"
+    },
+    {
+      "source": "pskoett/self-improving-agent",
+      "skill": "self-improvement",
+      "sourceUrl": "https://github.com/pskoett/self-improving-agent.git",
+      "desc": "自动记录错误和纠正，持续自我改进",
+      "type": "productivity"
+    },
+    {
+      "source": "remotion-dev/skills",
+      "skill": "remotion",
+      "sourceUrl": "https://github.com/remotion-dev/skills.git",
+      "desc": "Remotion 视频开发最佳实践，React 制作视频",
+      "type": "content"
+    },
+    {
+      "source": "sickn33/antigravity-awesome-skills",
+      "skill": "i18n-localization",
+      "sourceUrl": "https://github.com/sickn33/antigravity-awesome-skills.git",
+      "desc": "国际化与本地化，翻译管理和 RTL 支持",
+      "type": "dev"
+    },
+    {
+      "source": "coreyhaines31/marketingskills",
+      "skill": "seo-audit",
+      "sourceUrl": "https://github.com/coreyhaines31/marketingskills.git",
+      "desc": "SEO 审计与诊断，排查排名和索引问题",
+      "type": "productivity"
+    },
+    {
+      "source": "obra/superpowers",
+      "skill": "subagent-driven-development",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "desc": "子代理并行开发，拆分任务并发执行",
+      "type": "dev"
+    },
+    {
+      "source": "bahayonghang/drawio-skills",
+      "skill": "drawio",
+      "sourceUrl": "https://github.com/bahayonghang/drawio-skills.git",
+      "desc": "Draw.io 绘图，架构图、流程图、UML 等",
+      "type": "productivity"
+    }
+  ]
+}

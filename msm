@@ -1,0 +1,411 @@
+#!/usr/bin/env bash
+# msm - My Skill Manager
+# A lightweight CLI to manage AI agent skills with portable config
+# Usage: msm <command> [options]
+#
+# Commands:
+#   search <query>     Search skills from skills.sh
+#   add <source@skill> Install a skill globally
+#   list|ls            List installed skills
+#   remove <name>      Remove an installed skill
+#   update [name]      Update all or a specific skill
+#   export             Export installed skills to a portable config file
+#   import [file]      Install all skills from a config file
+#   info <name>        Show skill details
+#   init               Add 'msm' to your PATH
+
+set -euo pipefail
+
+SK_DIR="$(cd "$(dirname "$0")" && pwd)"
+SK_CONFIG="${SK_CONFIG:-$SK_DIR/skills.json}"
+SK_LOCK="$HOME/.agents/.skill-lock.json"
+SKILLS_API="https://skills.sh/api"
+SK_USER_CONFIG_DIR="$HOME/.config/myskills"
+SK_USER_CONFIG_FILE="$SK_USER_CONFIG_DIR/config.json"
+
+# Colors
+R=$'\033[0m' G=$'\033[32m' Y=$'\033[33m' C=$'\033[36m' RED=$'\033[31m' B=$'\033[1m' D=$'\033[2m'
+
+_info()  { printf "${C}ℹ${R} %s\n" "$*"; }
+_ok()    { printf "${G}✓${R} %s\n" "$*"; }
+_warn()  { printf "${Y}!${R} %s\n" "$*"; }
+_err()   { printf "${RED}✗${R} %s\n" "$*" >&2; }
+
+_ensure_npx() {
+  command -v npx &>/dev/null || { _err "npx not found. Install Node.js first."; exit 1; }
+}
+
+_ensure_user_config() {
+  if [ ! -d "$SK_USER_CONFIG_DIR" ]; then
+    mkdir -p "$SK_USER_CONFIG_DIR"
+  fi
+}
+
+_sync_user_config() {
+  _ensure_user_config
+  if [ -f "$SK_LOCK" ]; then
+    python3 -c "
+import json, sys, os
+
+lock_path = os.path.expanduser('~/.agents/.skill-lock.json')
+config_path = os.path.expanduser('$SK_USER_CONFIG_FILE')
+
+with open(lock_path) as f:
+    lock = json.load(f)
+
+skills_data = lock.get('skills', {})
+user_config = {'skills': [], 'meta': {'updated': '', 'source': '~/.agents/.skill-lock.json'}}
+
+from datetime import datetime
+user_config['meta']['updated'] = datetime.now().isoformat()
+
+for name, info in skills_data.items():
+    entry = {
+        'name': name,
+        'source': info.get('source', ''),
+        'skill': info.get('skillPath', '').replace('SKILL.md', '').rstrip('/').split('/')[-1] if info.get('skillPath') else name,
+    }
+    if 'sourceUrl' in info:
+        entry['sourceUrl'] = info['sourceUrl']
+    user_config['skills'].append(entry)
+
+with open(config_path, 'w') as f:
+    json.dump(user_config, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+" 2>/dev/null || true
+  fi
+}
+
+cmd_search() {
+  local query="${1:?Usage: msm search <query>}"
+  _info "Searching: $query"
+  local encoded
+  encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$query")
+  curl -s "${SKILLS_API}/search?q=${encoded}&limit=20" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+skills = data.get('skills', [])
+if not skills:
+    print('No results found.'); sys.exit()
+fmt = '{:<40} {:<35} {:>8}'
+print(fmt.format('SKILL', 'SOURCE', 'INSTALLS'))
+print('-' * 85)
+for s in skills:
+    name = s.get('skillId', s.get('name', '?'))
+    src = s.get('source', '?')
+    n = s.get('installs', 0)
+    print(fmt.format(name, src, f'{n/1000:.1f}K' if n >= 1000 else str(n)))
+q = data.get('query', '')
+print(f'\n{len(skills)} results for \"{q}\"')
+"
+}
+
+cmd_add() {
+  local pkg="${1:?Usage: msm add <source@skill>  (e.g. msm add anthropics/skills@docx)}"
+  _ensure_npx
+  _info "Installing: $pkg (all agents)"
+  npx -y skills@latest add "$pkg" -g -y --all
+  if [ $? -eq 0 ]; then
+    _ok "Installed: $pkg"
+    _sync_user_config
+    _info "User config synced to $SK_USER_CONFIG_FILE"
+  else
+    _err "Failed to install: $pkg"
+    exit 1
+  fi
+}
+
+cmd_list() {
+  _ensure_npx
+  local output
+  output=$(npx -y skills@latest list -g --json 2>/dev/null) || {
+    _err "Failed to list skills"; exit 1;
+  }
+  [ -z "$output" ] && { _info "No skills installed"; return; }
+
+  local config_path="$SK_CONFIG"
+  echo "$output" | python3 -c "
+import json, sys, os
+
+skills = json.load(sys.stdin)
+if not skills:
+    print('No skills installed.'); sys.exit()
+
+# Load desc and type from config file
+config_path = sys.argv[1] if len(sys.argv) > 1 else None
+desc_map = {}
+type_map = {}
+if config_path and os.path.isfile(config_path):
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+        for s in config.get('skills', []):
+            desc_map[s['skill']] = s.get('desc', '')
+            type_map[s['skill']] = s.get('type', '-')
+    except Exception:
+        pass
+
+fmt1 = '{:<28} {:<10} {:<12} {}'
+fmt2 = '{:<28} {:<10} {}'
+print(fmt1.format('SKILL', 'TYPE', 'AGENTS', 'PATH'))
+print('-' * 85)
+home = os.path.expanduser('~')
+for s in skills:
+    name = s.get('name', '?')
+    agents = str(len(s.get('agents', [])))
+    path = s.get('path', '').replace(home, '~')
+    stype = type_map.get(name, '-')
+    print(fmt1.format(name, stype, agents, path))
+print(f'\nTotal: {len(skills)} skills')
+
+if desc_map:
+    print()
+    print(fmt2.format('SKILL', 'TYPE', 'DESC'))
+    print('-' * 70)
+    for name in skills:
+        n = name.get('name', '?')
+        stype = type_map.get(n, '-')
+        desc = desc_map.get(n, '')
+        if desc:
+            print(fmt2.format(n, stype, desc))
+" "$config_path"
+}
+
+cmd_remove() {
+  local name="${1:?Usage: msm remove <skill-name>}"
+  _ensure_npx
+  _info "Removing: $name"
+  npx -y skills@latest remove "$name" -g -y
+  if [ $? -eq 0 ]; then
+    _ok "Removed: $name"
+    _sync_user_config
+  else
+    _err "Failed to remove: $name"
+    exit 1
+  fi
+}
+
+cmd_update() {
+  _ensure_npx
+  if [ -n "${1:-}" ]; then
+    _info "Updating: $1"
+    npx -y skills@latest update "$1" -y
+  else
+    _info "Updating all skills..."
+    npx -y skills@latest update -y
+  fi
+  if [ $? -eq 0 ]; then
+    _ok "Update complete"
+    _sync_user_config
+  else
+    _err "Update failed"
+    exit 1
+  fi
+}
+
+cmd_export() {
+  if [ ! -f "$SK_LOCK" ]; then
+    _err "No skill-lock.json found at $SK_LOCK"
+    _err "Have you installed any skills?"
+    exit 1
+  fi
+  local lock_path="$SK_LOCK" config_path="$SK_CONFIG" skills_dir="$HOME/.agents/skills"
+  python3 -c "
+import json, sys, os, re
+
+with open(sys.argv[1]) as f:
+    lock = json.load(f)
+
+skills_root = sys.argv[3]
+config_path = sys.argv[2]
+
+# Load existing config to preserve Chinese desc and type
+existing_desc = {}
+existing_type = {}
+if os.path.isfile(config_path):
+    try:
+        with open(config_path) as f:
+            old = json.load(f)
+        for s in old.get('skills', []):
+            if 'desc' in s:
+                existing_desc[s['skill']] = s['desc']
+            if 'type' in s:
+                existing_type[s['skill']] = s['type']
+    except Exception:
+        pass
+
+skills_data = lock.get('skills', {})
+portable = []
+for name, info in skills_data.items():
+    source = info.get('source', '')
+    skill_path = info.get('skillPath', '')
+    skill_id = skill_path.replace('SKILL.md', '').rstrip('/').split('/')[-1] if skill_path else name
+
+    entry = {'source': source, 'skill': skill_id or name}
+    source_url = info.get('sourceUrl', '')
+    if source_url:
+        entry['sourceUrl'] = source_url
+
+    # Use existing Chinese desc and type if available, otherwise read from SKILL.md
+    lookup_key = skill_id or name
+    if lookup_key in existing_desc:
+        entry['desc'] = existing_desc[lookup_key]
+    if lookup_key in existing_type:
+        entry['type'] = existing_type[lookup_key]
+    else:
+        skill_md = os.path.join(skills_root, name, 'SKILL.md')
+        if os.path.isfile(skill_md):
+            with open(skill_md) as f:
+                content = f.read()
+            m = re.search(r'description:\s*[\"\\']?(.+?)[\"\\']?\s*\n', content)
+            if m:
+                entry['desc'] = m.group(1).strip()
+
+    portable.append(entry)
+
+output = {
+    '#': 'Agent Skills Config - Portable across machines',
+    '# Usage': 'msm import skills.json',
+    'skills': portable
+}
+
+with open(config_path, 'w') as f:
+    json.dump(output, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+
+print(f'Exported {len(portable)} skills to {config_path}')
+" "$lock_path" "$config_path" "$skills_dir"
+  _ok "Config saved to $SK_CONFIG"
+}
+
+cmd_import() {
+  local config_file="${1:-$SK_CONFIG}"
+  if [ ! -f "$config_file" ]; then
+    _err "Config file not found: $config_file"
+    _err "Usage: msm import [path/to/skills.json]"
+    exit 1
+  fi
+  _ensure_npx
+  local count
+  count=$(python3 -c "import json; print(len(json.load(open(sys.argv[1])).get('skills', [])))" "$config_file")
+  _info "Found $count skills in $config_file"
+  _info "Installing..."
+  python3 -c "
+import json, subprocess, sys
+
+with open(sys.argv[1]) as f:
+    config = json.load(f)
+
+skills = config.get('skills', [])
+total = len(skills)
+for i, skill in enumerate(skills, 1):
+    source = skill.get('source', '')
+    skill_id = skill.get('skill', '')
+    pkg = f'{source}@{skill_id}' if skill_id else source
+    print(f'  [{i}/{total}] Installing {pkg}...')
+    result = subprocess.run(
+        ['npx', '-y', 'skills@latest', 'add', pkg, '-g', '-y', '--all'],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f'    Failed: {result.stderr.strip()[:100]}')
+    else:
+        print('    OK')
+print(f'\nDone. Processed {total} skills.')
+" "$config_file"
+  _ok "Import complete"
+  _sync_user_config
+}
+
+cmd_info() {
+  local name="${1:?Usage: msm info <skill-name>}"
+  if [ -f "$SK_LOCK" ]; then
+    python3 -c "
+import json, sys
+
+with open(sys.argv[1]) as f:
+    lock = json.load(f)
+
+skills = lock.get('skills', {})
+name = sys.argv[2]
+if name in skills:
+    info = skills[name]
+    print(f'Skill:      {name}')
+    print(f'Source:     {info.get(\"source\", \"?\")}')
+    print(f'Source URL: {info.get(\"sourceUrl\", \"?\")}')
+    print(f'Skill Path: {info.get(\"skillPath\", \"?\")}')
+    print(f'Installed:  {info.get(\"installedAt\", \"?\")}')
+    print(f'Updated:    {info.get(\"updatedAt\", \"?\")}')
+else:
+    print(f'Skill not found: {name}')
+" "$SK_LOCK" "$name"
+  else
+    _warn "No lock file found"
+  fi
+}
+
+cmd_init() {
+  local shell_profile=""
+  case "$SHELL" in
+    */zsh)  shell_profile="$HOME/.zshrc" ;;
+    */bash) shell_profile="$HOME/.bashrc" ;;
+    */fish) shell_profile="$HOME/.config/fish/config.fish" ;;
+    *)      shell_profile="$HOME/.profile" ;;
+  esac
+
+  if grep -q "msm" "$shell_profile" 2>/dev/null; then
+    _warn "Already configured in $shell_profile"
+  else
+    printf '\n# My Skill Manager\nexport PATH="%s:$PATH"\n' "$SK_DIR" >> "$shell_profile"
+    _ok "Added to $shell_profile"
+  fi
+
+  chmod +x "$SK_DIR/msm"
+  _ok "Script is executable"
+  _info "Run 'source $shell_profile' or restart your terminal to use 'msm'"
+}
+
+cmd_help() {
+  cat <<EOF
+${B}msm${R} - Agent Skills Manager
+
+${B}Commands:${R}
+  search <query>       Search skills from skills.sh
+  add <source@skill>   Install a skill for all agents (e.g. msm add anthropics/skills@docx)
+  list, ls             List installed skills
+  remove <name>        Remove an installed skill
+  update [name]        Update all or a specific skill
+  export               Export installed skills to ${C}skills.json${R} (portable config)
+  import [file]        Install all skills from config (default: skills.json)
+  info <name>          Show skill details
+  init                 Add 'sk' to your PATH (shell profile)
+  help                 Show this help
+
+${B}Portable Config:${R}
+  ${D}skills.json${R} - Export your skills, copy to another machine, run 'msm import'
+
+${B}Examples:${R}
+  msm search git
+  msm add anthropics/skills@docx
+  msm add vercel-labs/agent-browser@agent-browser
+  msm list
+  msm export
+  sk import skills.json
+  msm init
+EOF
+}
+
+# Main
+case "${1:-help}" in
+  search|s)  cmd_search "${2:-}" ;;
+  add|a)     cmd_add "${2:-}" ;;
+  list|ls|l) cmd_list ;;
+  remove|rm) cmd_remove "${2:-}" ;;
+  update|u)  cmd_update "${2:-}" ;;
+  export|e)  cmd_export ;;
+  import|i)  cmd_import "${2:-}" ;;
+  info)      cmd_info "${2:-}" ;;
+  init)      cmd_init ;;
+  help|--help|-h) cmd_help ;;
+  *)         _err "Unknown command: $1"; cmd_help; exit 1 ;;
+esac

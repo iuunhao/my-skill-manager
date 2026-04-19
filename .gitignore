@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local configs
+.claude/settings.local.json
+.claude/projects.local.json
+
+# Session state
+.omc/
+.omc/**/*.local.json
+
+# Skill lock (machine-specific)
+.agents/
